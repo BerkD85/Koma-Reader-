@@ -329,6 +329,7 @@ button{font-family:inherit}
     <span class="folder-bar-name" id="folderBarName"></span>
     <div style="display:flex;gap:6px">
       <button class="btn btn-s" id="folderReorderBtn">↕️</button>
+      <button class="btn btn-s" id="folderNewSubBtn">📁</button>
       <button class="btn btn-s" id="folderAddBtn">＋</button>
     </div>
   </div>
@@ -484,6 +485,7 @@ var ctxTgt=null, lpTmr=null;
 var swipeStartX=0, swipeStartY=0, swiping=false, swipeHandled=false;
 var reorderMode=false;
 var openFolder=null;
+var folderStack=[];
 
 var bgColors=[
   {name:"Black",color:"#000000"},
@@ -523,7 +525,8 @@ function renderLib(){
   var items;
   if(openFolder){
     folderBar.style.display="flex";
-    $("folderBarName").textContent=openFolder.name;
+    var crumbs=folderStack.map(function(f){return f.name}).concat([openFolder.name]);
+    $("folderBarName").textContent=crumbs.join(" > ");
     items=[];
     (openFolder.children||[]).forEach(function(cid){
       var found=lib.find(function(m){return m.id===cid});
@@ -567,7 +570,7 @@ function renderLib(){
       h+='</div>';
       h+='</div>';
       h+='<div class="ti">'+esc(m.name)+'</div>';
-      h+='<div class="folder-count">'+kids.length+' title'+(kids.length!==1?'s':'')+'</div>';
+      h+='<div class="folder-count">'+kids.length+' item'+(kids.length!==1?'s':'')+'</div>';
       h+='</div>';
     }else{
       var pct=m.lastPage>0?((m.lastPage+1)/m.images.length*100):0;
@@ -799,14 +802,51 @@ function getFilteredMainItems(){
   return lib.filter(function(m){return !inFolder[m.id]});
 }
 
+// Get all ancestor folder IDs for a given folder to prevent circular nesting
+function getAncestorIds(folderId){
+  var ancestors={};
+  function walk(fid){
+    lib.forEach(function(m){
+      if(m.type==="folder"&&m.children&&m.children.indexOf(fid)>=0&&!ancestors[m.id]){
+        ancestors[m.id]=true;
+        walk(m.id);
+      }
+    });
+  }
+  walk(folderId);
+  return ancestors;
+}
+
+// Get all descendant IDs (folders + manga) under a folder
+function getDescendantIds(folderId){
+  var desc={};
+  function walk(fid){
+    var f=lib.find(function(m){return m.id===fid});
+    if(!f||!f.children) return;
+    f.children.forEach(function(cid){
+      if(!desc[cid]){desc[cid]=true;walk(cid);}
+    });
+  }
+  walk(folderId);
+  return desc;
+}
+
 /* ═══ FOLDERS ═══ */
 function openFolderView(folder){
+  if(openFolder) folderStack.push(openFolder);
   openFolder=folder;
   renderLib();
 }
 
 function closeFolderView(){
-  openFolder=null;
+  if(folderStack.length>0){
+    openFolder=folderStack.pop();
+    // refresh openFolder from lib in case it was updated
+    var fresh=lib.find(function(m){return m.id===openFolder.id});
+    if(fresh) openFolder=fresh;
+  }else{
+    openFolder=null;
+  }
   renderLib();
 }
 
@@ -824,8 +864,16 @@ function createFolder(name){
 }
 
 function addToFolderModal(folder){
-  // show all manga not already in this folder
-  var mangas=lib.filter(function(m){return m.type!=="folder"&&(folder.children||[]).indexOf(m.id)===-1});
+  // show all items (manga + folders) not already in this folder, excluding self and ancestors
+  var ancestors=getAncestorIds(folder.id);
+  var descendants=getDescendantIds(folder.id);
+  var mangas=lib.filter(function(m){
+    if(m.id===folder.id) return false;          // can't add self
+    if(ancestors[m.id]) return false;            // can't add an ancestor (circular)
+    if(descendants[m.id]) return false;          // already a descendant
+    if((folder.children||[]).indexOf(m.id)>=0) return false; // already direct child
+    return true;
+  });
   if(mangas.length===0){alert("No titles available to add.");return}
   var selected={};
   var h='<div class="atf-list">';
@@ -895,13 +943,37 @@ $("newFolderBtn").addEventListener("click",function(){
 function doCreateFolder(){
   var v=$("folderNameInput").value.trim();
   if(!v)return;
-  createFolder(v);
+  if(openFolder){
+    var f={id:"f_"+Date.now()+"_"+Math.random().toString(36).slice(2,6),type:"folder",name:v,children:[],addedAt:Date.now(),sortOrder:lib.length};
+    lib.push(f);
+    openFolder.children=(openFolder.children||[]);
+    openFolder.children.push(f.id);
+    Promise.all([dbPut(f),dbPut(openFolder)]).then(function(){
+      lib=lib.map(function(m){return m.id===openFolder.id?openFolder:m});
+      renderLib();
+    });
+  }else{
+    createFolder(v);
+  }
   closeModal();
 }
 
 $("folderBack").addEventListener("click",closeFolderView);
 $("folderAddBtn").addEventListener("click",function(){
   if(openFolder) addToFolderModal(openFolder);
+});
+$("folderNewSubBtn").addEventListener("click",function(){
+  if(!openFolder) return;
+  showModal("New Subfolder","",
+    '<input type="text" id="folderNameInput" placeholder="Folder name">',
+    '<button class="btn" id="nfCancel">Cancel</button><button class="btn btn-a" id="nfCreate">Create</button>'
+  );
+  setTimeout(function(){
+    var inp=$("folderNameInput");inp.focus();
+    inp.addEventListener("keydown",function(e){if(e.key==="Enter"&&inp.value.trim())doCreateFolder()});
+    $("nfCancel").addEventListener("click",closeModal);
+    $("nfCreate").addEventListener("click",doCreateFolder);
+  },50);
 });
 $("folderReorderBtn").addEventListener("click",function(){
   if(!openFolder)return;
@@ -1356,7 +1428,7 @@ function showCtx(e,idx,items){
   var menuH='<div id="ctxRename">✏️ Rename</div>';
   if(!isFolder) menuH+='<div id="ctxThumb">🖼 Change Thumbnail</div>';
   if(!isFolder) menuH+='<div id="ctxPages">📄 Manage Pages</div>';
-  if(inFolder&&!isFolder) menuH+='<div id="ctxRemoveFromFolder">📤 Remove from Folder</div>';
+  if(inFolder) menuH+='<div id="ctxRemoveFromFolder">📤 Remove from Folder</div>';
   menuH+='<div class="dng" id="ctxDelete">🗑 Delete</div>';
 
   ctxMenu.innerHTML=menuH;
@@ -1368,7 +1440,7 @@ function showCtx(e,idx,items){
   $("ctxRename").addEventListener("click",function(){closeCtx();startRename()});
   if(!isFolder&&$("ctxThumb")) $("ctxThumb").addEventListener("click",function(){closeCtx();startThumbPicker()});
   if(!isFolder&&$("ctxPages")) $("ctxPages").addEventListener("click",function(){closeCtx();startManagePages()});
-  if(inFolder&&!isFolder&&$("ctxRemoveFromFolder")) $("ctxRemoveFromFolder").addEventListener("click",function(){closeCtx();removeFromFolder(ctxTgt)});
+  if(inFolder&&$("ctxRemoveFromFolder")) $("ctxRemoveFromFolder").addEventListener("click",function(){closeCtx();removeFromFolder(ctxTgt)});
   $("ctxDelete").addEventListener("click",function(){closeCtx();startDelete()});
 }
 function closeCtx(){ctxMenu.style.display="none";ctxBg.style.display="none"}
@@ -1408,7 +1480,7 @@ function doRename(){
 
 function startDelete(){
   var isFolder=ctxTgt.type==="folder";
-  var inFolder=!!openFolder&&!isFolder;
+  var inFolder=!!openFolder;
 
   if(inFolder){
     // inside a folder — offer remove from folder vs permanent delete
