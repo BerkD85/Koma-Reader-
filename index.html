@@ -278,7 +278,11 @@ button{font-family:inherit}
   var manifest={"name":"Koma Reader","short_name":"Koma","start_url":".","display":"standalone","background_color":"#0a0a0b","theme_color":"#0a0a0b","orientation":"portrait","icons":[{"src":cv.toDataURL(),"sizes":"512x512","type":"image/png","purpose":"any maskable"}]};
   document.getElementById("pwaManifest").href=URL.createObjectURL(new Blob([JSON.stringify(manifest)],{type:"application/json"}));
   if("serviceWorker" in navigator){
-    var sw='self.addEventListener("install",function(e){self.skipWaiting()});self.addEventListener("activate",function(e){e.waitUntil(clients.claim())});self.addEventListener("fetch",function(e){e.respondWith(fetch(e.request).catch(function(){return new Response("",{status:503})}))});';
+    var sw='self.addEventListener("install",function(e){self.skipWaiting()});'
+      +'self.addEventListener("activate",function(e){e.waitUntil(clients.claim())});'
+      +'self.addEventListener("fetch",function(e){'
+      +'  e.respondWith(fetch(e.request,{cache:"no-store"}).catch(function(){return caches.match(e.request)}));'
+      +'});';
     navigator.serviceWorker.register(URL.createObjectURL(new Blob([sw],{type:"application/javascript"})),{scope:"./"}).catch(function(){});
   }
 })();
