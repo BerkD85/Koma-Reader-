@@ -147,6 +147,15 @@ button{font-family:inherit}
 
 .r-page{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;overflow:hidden;touch-action:pan-y}
 .r-page.zoomed{touch-action:none}
+.card-read-badge{
+  position:absolute;top:6px;left:6px;width:24px;height:24px;
+  background:#2e7d32;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:14px;line-height:1;color:#fff;z-index:2;
+  box-shadow:0 1px 4px rgba(0,0,0,0.4);pointer-events:none;
+}
+.card{position:relative}
+.card-folder{position:relative}
+
 .r-page img{max-width:100%;max-height:100%;object-fit:contain;user-select:none;-webkit-user-drag:none}
 .r-page img.notrans{transition:none}
 
@@ -562,6 +571,7 @@ function renderLib(){
     if(m.type==="folder"){
       var kids=(m.children||[]);
       h+='<div class="card card-folder" data-i="'+i+'" data-type="folder">';
+      if(m.read) h+='<div class="card-read-badge">✓</div>';
       h+='<div class="folder-icon">';
       h+='<div class="folder-label">📁</div>';
       // folder previews set after DOM insert
@@ -575,6 +585,7 @@ function renderLib(){
     }else{
       var pct=m.lastPage>0?((m.lastPage+1)/m.images.length*100):0;
       h+='<div class="card" data-i="'+i+'">';
+      if(m.read) h+='<div class="card-read-badge">✓</div>';
       h+='<img class="card-thumb-img" data-ci="'+i+'" src="" draggable="false" style="width:100%;aspect-ratio:2/3;object-fit:cover;display:block;background:var(--sf2)">';
       h+='<div class="ti">'+esc(m.name)+'</div>';
       h+='<div class="pg">'+m.images.length+' pages'+(m.lastPage>0?' · p.'+(m.lastPage+1):'')+'</div>';
@@ -1429,6 +1440,8 @@ function showCtx(e,idx,items){
   if(!isFolder) menuH+='<div id="ctxThumb">🖼 Change Thumbnail</div>';
   if(!isFolder) menuH+='<div id="ctxPages">📄 Manage Pages</div>';
   if(inFolder) menuH+='<div id="ctxRemoveFromFolder">📤 Remove from Folder</div>';
+  var readLabel=ctxTgt.read?'❌ Mark as Unread':'✅ Mark as Read';
+  menuH+='<div id="ctxToggleRead">'+readLabel+'</div>';
   menuH+='<div class="dng" id="ctxDelete">🗑 Delete</div>';
 
   ctxMenu.innerHTML=menuH;
@@ -1441,6 +1454,15 @@ function showCtx(e,idx,items){
   if(!isFolder&&$("ctxThumb")) $("ctxThumb").addEventListener("click",function(){closeCtx();startThumbPicker()});
   if(!isFolder&&$("ctxPages")) $("ctxPages").addEventListener("click",function(){closeCtx();startManagePages()});
   if(inFolder&&$("ctxRemoveFromFolder")) $("ctxRemoveFromFolder").addEventListener("click",function(){closeCtx();removeFromFolder(ctxTgt)});
+  $("ctxToggleRead").addEventListener("click",function(){
+    closeCtx();
+    ctxTgt.read=!ctxTgt.read;
+    dbPut(ctxTgt).then(function(){
+      lib=lib.map(function(m){return m.id===ctxTgt.id?ctxTgt:m});
+      if(openFolder&&openFolder.id===ctxTgt.id) openFolder=ctxTgt;
+      renderLib();
+    });
+  });
   $("ctxDelete").addEventListener("click",function(){closeCtx();startDelete()});
 }
 function closeCtx(){ctxMenu.style.display="none";ctxBg.style.display="none"}
